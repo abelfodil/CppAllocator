@@ -37,6 +37,7 @@ struct MemoryHeapChunk : LowLevelAllocatorPolicy {
                 p->is_used = false;
                 auto const next = p->next.get();
                 Merge(p);
+                // TODO see if this second call can be eliminated
                 Merge(next);
                 break;
             }
@@ -172,6 +173,17 @@ void test(AllocatorType&& allocator) {
         allocator.free(elements[i]);
     }
     std::cout << "Number of chunks after free: " << allocator.__test_count_chunks() << "\n";
+
+    null_elements = 0;
+    for (int i = 0; i < ALLOC_ELEMENTS; ++i) {
+        null_elements += elements[i] == nullptr;
+    }
+    std::cout << "Number of null elements after alloc: " << null_elements << "\n";
+
+    for (int i = ALLOC_ELEMENTS; i >= 0; --i) {
+        allocator.free(elements[i]);
+    }
+    std::cout << "Number of chunks after free backwards: " << allocator.__test_count_chunks() << "\n";
 
     std::cout << "\n\n";
 }
