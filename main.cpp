@@ -3,7 +3,7 @@
 #include <memory>
 
 struct OSAllocator {
-    inline static size_t MinimalSize = 1024;
+    inline static size_t MinimalSize = 4096;
 
     void *Allocate(size_t size) {
         return mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS, -1, 0);
@@ -168,30 +168,38 @@ void test(AllocatorType &&allocator) {
         elements[i] = static_cast<char *>(allocator.alloc(1));
     }
     std::cout << "Number of chunks after alloc: " << allocator.__test_count_chunks() << ", expected: "
-              << std::min(ALLOC_ELEMENTS, ALLOC_ELEMENTS - AllocatorType::AllocatorPolicy::MinimalSize) << "\n";
+              << std::min(AllocatorType::AllocatorPolicy::MinimalSize, ALLOC_ELEMENTS) << "\n";
 
     size_t null_elements = 0;
     for (int i = 0; i < ALLOC_ELEMENTS; ++i) {
         null_elements += elements[i] == nullptr;
     }
     std::cout << "Number of null elements after alloc: " << null_elements << ", expected: "
-              << std::min(ALLOC_ELEMENTS, ALLOC_ELEMENTS - AllocatorType::AllocatorPolicy::MinimalSize) << "\n";
+              << std::max(0, (int) ALLOC_ELEMENTS - (int) AllocatorType::AllocatorPolicy::MinimalSize) << "\n";
 
     for (int i = 0; i < ALLOC_ELEMENTS; ++i) {
         allocator.free(elements[i]);
+        elements[i] = nullptr;
     }
     std::cout << "Number of chunks after free: " << allocator.__test_count_chunks() << ", expected: "
               << 1 << "\n";
+
+    for (int i = 0; i < ALLOC_ELEMENTS; ++i) {
+        elements[i] = static_cast<char *>(allocator.alloc(1));
+    }
+    std::cout << "Number of chunks after alloc: " << allocator.__test_count_chunks() << ", expected: "
+              << std::min(AllocatorType::AllocatorPolicy::MinimalSize, ALLOC_ELEMENTS) << "\n";
 
     null_elements = 0;
     for (int i = 0; i < ALLOC_ELEMENTS; ++i) {
         null_elements += elements[i] == nullptr;
     }
     std::cout << "Number of null elements after alloc: " << null_elements << ", expected: "
-              << std::max(0, (int)ALLOC_ELEMENTS - (int)AllocatorType::AllocatorPolicy::MinimalSize) << "\n";
+              << std::max(0, (int) ALLOC_ELEMENTS - (int) AllocatorType::AllocatorPolicy::MinimalSize) << "\n";
 
     for (int i = ALLOC_ELEMENTS; i >= 0; --i) {
         allocator.free(elements[i]);
+        elements[i] = nullptr;
     }
     std::cout << "Number of chunks after free backwards: " << allocator.__test_count_chunks() << ", expected: "
               << 1 << "\n";
