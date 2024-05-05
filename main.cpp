@@ -38,10 +38,7 @@ struct MemoryHeapChunk : LowLevelAllocatorPolicy {
         for (auto p = this; p != nullptr;) {
             if (p->ptr == ptr) {
                 p->is_used = false;
-                auto const next = p->next.get();
                 Merge(p);
-                // TODO see if this second call can be eliminated
-                Merge(next);
                 break;
             }
             p = p->next.get();
@@ -99,45 +96,57 @@ private:
     std::shared_ptr<MemoryHeapChunk> Fragment(MemoryHeapChunk *to_fragment, size_t fragment_at) {
         const size_t original_size = to_fragment->size;
         if (fragment_at >= original_size) {
-            return nullptr;
+            return std::move(to_fragment->next);
         }
 
         // TODO take alignment into account
         const size_t new_size = to_fragment->size - fragment_at;
         to_fragment->size = fragment_at;
 
-        auto const old_next = to_fragment->next;
-
         to_fragment->next = std::make_shared<MemoryHeapChunk>(MemoryHeapChunk{
                 .ptr = static_cast<char *>(to_fragment->ptr) + new_size,
                 .size = new_size,
-                .prev = to_fragment
+                .prev = to_fragment,
+                .next = std::move(to_fragment->next)
         });
 
-        if (old_next) {
-            old_next->prev = to_fragment->next.get();
+        if (to_fragment->next->next) {
+            to_fragment->next->next->prev = to_fragment->next.get();
         }
 
         return to_fragment->next;
     }
 
     void Merge(MemoryHeapChunk *to_merge) {
-        if (!to_merge) {
+        if (!to_merge || to_merge->is_used) {
             return;
         }
 
-        auto const previous = to_merge->prev;
+        constexpr auto merge_with_previous = [](auto current, auto previous) {
+            previous->size += current->size;
+            auto &&next = current->next;
+            if (next) {
+                previous->next = next;
+                previous->next->prev = previous;
+            } else {
+                previous->next.reset();
+            }
+        };
+
+        auto current = to_merge;
+        auto next = to_merge->next.get();
+        auto previous = to_merge->prev;
+
         // TODO decouple from is_used
-        if (!previous || previous->is_used || to_merge->is_used) {
-            return;
+        if (previous && !previous->is_used) {
+            auto old_current = current;
+            current = previous;
+            merge_with_previous(old_current, previous);
         }
 
-        previous->size += to_merge->size;
-        if (to_merge->next) {
-            previous->next = std::move(to_merge->next);
-            previous->next->prev = previous;
-        } else {
-            previous->next.reset();
+        // TODO decouple from is_used
+        if (next && !next->is_used) {
+            merge_with_previous(next, current);
         }
     }
 
@@ -168,7 +177,7 @@ void test(AllocatorType &&allocator) {
         elements[i] = static_cast<char *>(allocator.alloc(1));
     }
     std::cout << "Number of chunks after alloc: " << allocator.__test_count_chunks() << ", expected: "
-              << std::min(AllocatorType::AllocatorPolicy::MinimalSize, ALLOC_ELEMENTS) << "\n";
+              << std::min(AllocatorType::AllocatorPolicy::MinimalSize, ALLOC_ELEMENTS + 1) << "\n";
 
     size_t null_elements = 0;
     for (int i = 0; i < ALLOC_ELEMENTS; ++i) {
@@ -188,7 +197,7 @@ void test(AllocatorType &&allocator) {
         elements[i] = static_cast<char *>(allocator.alloc(1));
     }
     std::cout << "Number of chunks after alloc: " << allocator.__test_count_chunks() << ", expected: "
-              << std::min(AllocatorType::AllocatorPolicy::MinimalSize, ALLOC_ELEMENTS) << "\n";
+              << std::min(AllocatorType::AllocatorPolicy::MinimalSize, ALLOC_ELEMENTS + 1) << "\n";
 
     null_elements = 0;
     for (int i = 0; i < ALLOC_ELEMENTS; ++i) {
