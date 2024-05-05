@@ -4,6 +4,7 @@
 
 struct OSAllocator {
     inline static size_t MinimalSize = 1024;
+
     void *Allocate(size_t size) {
         return mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS, -1, 0);
     }
@@ -16,7 +17,7 @@ struct StackAllocator {
     inline static char buffer[Size];
 
     void *Allocate(size_t size) {
-        if(size > Size) {
+        if (size > Size) {
             return nullptr;
         }
         return buffer;
@@ -25,6 +26,8 @@ struct StackAllocator {
 
 template<typename LowLevelAllocatorPolicy>
 struct MemoryHeapChunk : LowLevelAllocatorPolicy {
+    using AllocatorPolicy = LowLevelAllocatorPolicy;
+
     void *ptr = nullptr;
     size_t size = 0;
     bool is_used = false;
@@ -59,8 +62,8 @@ struct MemoryHeapChunk : LowLevelAllocatorPolicy {
             return nullptr;
         }
 
-        if(is_used || size > this->size) {
-            if(next) {
+        if (is_used || size > this->size) {
+            if (next) {
                 return next->alloc(size);
             } else {
                 return nullptr;
@@ -143,52 +146,60 @@ private:
 };
 
 template<typename AllocatorType>
-void test(AllocatorType&& allocator) {
+void test(AllocatorType &&allocator) {
     std::cout << "Testing allocator of type: " << typeid(AllocatorType).name() << "\n";
 
-    std::cout << "Last chunk size before alloc: " << allocator.__test_get_last_chunk()->size << "\n";
+    std::cout << "Last chunk size before alloc: " << allocator.__test_get_last_chunk()->size << ", expected: " << 0
+              << "\n";
 
-    char* const elem = static_cast<char *>(allocator.alloc(1));
-    std::cout << "Last chunk size after 1 alloc: " << allocator.__test_get_last_chunk()->size << "\n";
+    char *const elem = static_cast<char *>(allocator.alloc(1));
+    std::cout << "Last chunk size after 1 alloc: " << allocator.__test_get_last_chunk()->size << ", expected: "
+              << AllocatorType::AllocatorPolicy::MinimalSize - 1 << "\n";
 
     allocator.free(elem);
     auto last_chunk = allocator.__test_get_last_chunk();
-    std::cout << "Last chunk size after 1 free: " << last_chunk->size << "\n";
+    std::cout << "Last chunk size after 1 free: " << last_chunk->size << ", expected: "
+              << AllocatorType::AllocatorPolicy::MinimalSize << "\n";
 
-    constexpr auto ALLOC_ELEMENTS = 4096;
+    constexpr size_t ALLOC_ELEMENTS = 4096;
     char *elements[ALLOC_ELEMENTS];
 
     for (int i = 0; i < ALLOC_ELEMENTS; ++i) {
         elements[i] = static_cast<char *>(allocator.alloc(1));
     }
-    std::cout << "Number of chunks after alloc: " << allocator.__test_count_chunks() << "\n";
+    std::cout << "Number of chunks after alloc: " << allocator.__test_count_chunks() << ", expected: "
+              << std::min(ALLOC_ELEMENTS, ALLOC_ELEMENTS - AllocatorType::AllocatorPolicy::MinimalSize) << "\n";
 
     size_t null_elements = 0;
     for (int i = 0; i < ALLOC_ELEMENTS; ++i) {
         null_elements += elements[i] == nullptr;
     }
-    std::cout << "Number of null elements after alloc: " << null_elements << "\n";
+    std::cout << "Number of null elements after alloc: " << null_elements << ", expected: "
+              << std::min(ALLOC_ELEMENTS, ALLOC_ELEMENTS - AllocatorType::AllocatorPolicy::MinimalSize) << "\n";
 
     for (int i = 0; i < ALLOC_ELEMENTS; ++i) {
         allocator.free(elements[i]);
     }
-    std::cout << "Number of chunks after free: " << allocator.__test_count_chunks() << "\n";
+    std::cout << "Number of chunks after free: " << allocator.__test_count_chunks() << ", expected: "
+              << 1 << "\n";
 
     null_elements = 0;
     for (int i = 0; i < ALLOC_ELEMENTS; ++i) {
         null_elements += elements[i] == nullptr;
     }
-    std::cout << "Number of null elements after alloc: " << null_elements << "\n";
+    std::cout << "Number of null elements after alloc: " << null_elements << ", expected: "
+              << std::max(0, (int)ALLOC_ELEMENTS - (int)AllocatorType::AllocatorPolicy::MinimalSize) << "\n";
 
     for (int i = ALLOC_ELEMENTS; i >= 0; --i) {
         allocator.free(elements[i]);
     }
-    std::cout << "Number of chunks after free backwards: " << allocator.__test_count_chunks() << "\n";
+    std::cout << "Number of chunks after free backwards: " << allocator.__test_count_chunks() << ", expected: "
+              << 1 << "\n";
 
     std::cout << "\n\n";
 }
 
 int main() {
     test(MemoryHeapChunk<OSAllocator>{});
-    test(MemoryHeapChunk<StackAllocator<2048>>{});
+    test(MemoryHeapChunk<StackAllocator<8048>>{});
 }
