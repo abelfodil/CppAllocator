@@ -173,42 +173,42 @@ void test(AllocatorType &&allocator) {
     constexpr size_t ALLOC_ELEMENTS = 4096;
     char *elements[ALLOC_ELEMENTS];
 
-    for (int i = 0; i < ALLOC_ELEMENTS; ++i) {
-        elements[i] = static_cast<char *>(allocator.alloc(1));
+    for (auto &element: elements) {
+        element = static_cast<char *>(allocator.alloc(1));
     }
     std::cout << "Number of chunks after alloc: " << allocator.__test_count_chunks() << ", expected: "
               << std::min(AllocatorType::AllocatorPolicy::MinimalSize, ALLOC_ELEMENTS + 1) << "\n";
 
     size_t null_elements = 0;
-    for (int i = 0; i < ALLOC_ELEMENTS; ++i) {
-        null_elements += elements[i] == nullptr;
+    for (auto &element: elements) {
+        null_elements += element == nullptr;
     }
     std::cout << "Number of null elements after alloc: " << null_elements << ", expected: "
               << std::max(0, (int) ALLOC_ELEMENTS - (int) AllocatorType::AllocatorPolicy::MinimalSize) << "\n";
 
-    for (int i = 0; i < ALLOC_ELEMENTS; ++i) {
-        allocator.free(elements[i]);
-        elements[i] = nullptr;
+    for (auto &element: elements) {
+        allocator.free(element);
+        element = nullptr;
     }
     std::cout << "Number of chunks after free: " << allocator.__test_count_chunks() << ", expected: "
               << 1 << "\n";
 
-    for (int i = 0; i < ALLOC_ELEMENTS; ++i) {
-        elements[i] = static_cast<char *>(allocator.alloc(1));
+    for (auto &element: elements) {
+        element = static_cast<char *>(allocator.alloc(1));
     }
     std::cout << "Number of chunks after alloc: " << allocator.__test_count_chunks() << ", expected: "
               << std::min(AllocatorType::AllocatorPolicy::MinimalSize, ALLOC_ELEMENTS + 1) << "\n";
 
     null_elements = 0;
-    for (int i = 0; i < ALLOC_ELEMENTS; ++i) {
-        null_elements += elements[i] == nullptr;
+    for (auto &element: elements) {
+        null_elements += element == nullptr;
     }
     std::cout << "Number of null elements after alloc: " << null_elements << ", expected: "
               << std::max(0, (int) ALLOC_ELEMENTS - (int) AllocatorType::AllocatorPolicy::MinimalSize) << "\n";
 
-    for (int i = ALLOC_ELEMENTS; i >= 0; --i) {
-        allocator.free(elements[i]);
-        elements[i] = nullptr;
+    for (auto &element: elements) {
+        allocator.free(element);
+        element = nullptr;
     }
     std::cout << "Number of chunks after free backwards: " << allocator.__test_count_chunks() << ", expected: "
               << 1 << "\n";
