@@ -30,15 +30,11 @@ struct StackAllocator {
 
     inline static char buffer[Size];
 
-    static AllocatedMemory Allocate(size_t size) {
-        return size > Size
-               ? AllocatedMemory{
-                        .ptr = nullptr,
-                        .size = 0,}
-               : AllocatedMemory{
-                        .ptr = buffer,
-                        .size = Size,
-                };
+    static AllocatedMemory Allocate(size_t) {
+        return AllocatedMemory{
+                .ptr = buffer,
+                .size = Size,
+        };
     }
 };
 
