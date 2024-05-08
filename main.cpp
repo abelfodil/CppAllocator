@@ -1,6 +1,5 @@
 #include <sys/mman.h>
 #include <iostream>
-#include <memory>
 #include <list>
 #include <algorithm>
 
