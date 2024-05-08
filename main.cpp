@@ -4,6 +4,32 @@
 #include <algorithm>
 #include <chrono>
 #include <unistd.h>
+#include <atomic>
+#include <execution>
+
+// Taken from https://rigtorp.se/spinlock/
+struct Spinlock {
+    std::atomic<bool> lock_ = {false};
+
+    void lock() {
+        for (;;) {
+            if (try_lock()) {
+                break;
+            }
+            while (lock_.load(std::memory_order_relaxed)) {
+                __builtin_ia32_pause();
+            }
+        }
+    }
+
+    bool try_lock() {
+        return !lock_.exchange(true, std::memory_order_acquire);
+    }
+
+    void unlock() {
+        lock_.store(false, std::memory_order_release);
+    }
+};
 
 struct AllocatedMemory {
     void *ptr;
@@ -116,7 +142,9 @@ struct AdjacentMerger {
     }
 };
 
-template<template<typename> typename Container, typename LowLevelAllocatorPolicy,
+template<template<typename> typename Container,
+        typename MutexType,
+        typename LowLevelAllocatorPolicy,
         template<template<typename> typename> typename FragmenterPolicy,
         template<template<typename> typename> typename MergerPolicy>
 struct MemoryHeap : LowLevelAllocatorPolicy, FragmenterPolicy<Container>, MergerPolicy<Container> {
@@ -124,8 +152,14 @@ struct MemoryHeap : LowLevelAllocatorPolicy, FragmenterPolicy<Container>, Merger
     using ContainerType = Container<MemoryChunk>;
 
     ContainerType storage{};
+    MutexType mutex;
 
     void free(void *ptr) {
+        if (!ptr) {
+            return;
+        }
+
+        std::lock_guard lock{mutex};
         auto const p = std::find_if(std::begin(storage), std::end(storage), [ptr](auto const &e) { return e == ptr; });
         if (p != std::cend(storage)) {
             p->is_used = false;
@@ -134,6 +168,7 @@ struct MemoryHeap : LowLevelAllocatorPolicy, FragmenterPolicy<Container>, Merger
     }
 
     void *alloc(size_t size) {
+        std::lock_guard lock{mutex};
         if (std::empty(storage)) {
             storage.emplace_back(MemoryChunk::from(Allocate(size)));
         }
@@ -181,16 +216,21 @@ void test(AllocatorType &&allocator) {
               << AllocatorType::AllocatorPolicy::MinimalSize << "\n";
 
     constexpr size_t ALLOC_ELEMENTS = 4096;
-    char *elements[ALLOC_ELEMENTS];
+    std::array<char *, ALLOC_ELEMENTS> elements{};
 
     using std::chrono::high_resolution_clock;
     using std::chrono::duration_cast;
     using std::chrono::milliseconds;
 
     auto t1 = high_resolution_clock::now();
-    for (auto &element: elements) {
-        element = static_cast<char *>(allocator.alloc(1));
-    }
+    std::for_each(
+            std::execution::par_unseq,
+            elements.begin(),
+            elements.end(),
+            [&allocator](auto &e) {
+                e = static_cast<char *>(allocator.alloc(1));
+            }
+    );
     auto t2 = high_resolution_clock::now();
 
     std::cout << "Number of chunks after alloc: " << allocator.__test_count_chunks() << ", expected: "
@@ -205,10 +245,15 @@ void test(AllocatorType &&allocator) {
               << std::max(0, (int) ALLOC_ELEMENTS - (int) AllocatorType::AllocatorPolicy::MinimalSize) << "\n";
 
     t1 = high_resolution_clock::now();
-    for (auto &element: elements) {
-        allocator.free(element);
-        element = nullptr;
-    }
+    std::for_each(
+            std::execution::par_unseq,
+            elements.begin(),
+            elements.end(),
+            [&allocator](auto &e) {
+                allocator.free(e);
+                e = nullptr;
+            }
+    );
     t2 = high_resolution_clock::now();
     std::cout << "Number of chunks after free: " << allocator.__test_count_chunks() << ", expected: "
               << 1 << "\n";
@@ -242,8 +287,12 @@ void test(AllocatorType &&allocator) {
 }
 
 int main() {
-    test(MemoryHeap<std::list, OSAllocator, ForwardFragmenter, AdjacentMerger>{});
-    test(MemoryHeap<std::list, StackAllocator<8192>, ForwardFragmenter, AdjacentMerger>{});
-    test(MemoryHeap<std::vector, OSAllocator, ForwardFragmenter, AdjacentMerger>{});
-    test(MemoryHeap<std::vector, StackAllocator<8192>, ForwardFragmenter, AdjacentMerger>{});
+    test(MemoryHeap<std::list, Spinlock, OSAllocator, ForwardFragmenter, AdjacentMerger>{});
+    test(MemoryHeap<std::list, Spinlock, StackAllocator<8192>, ForwardFragmenter, AdjacentMerger>{});
+    test(MemoryHeap<std::list, std::mutex, OSAllocator, ForwardFragmenter, AdjacentMerger>{});
+    test(MemoryHeap<std::list, std::mutex, StackAllocator<8192>, ForwardFragmenter, AdjacentMerger>{});
+    test(MemoryHeap<std::vector, Spinlock, OSAllocator, ForwardFragmenter, AdjacentMerger>{});
+    test(MemoryHeap<std::vector, Spinlock, StackAllocator<8192>, ForwardFragmenter, AdjacentMerger>{});
+    test(MemoryHeap<std::vector, std::mutex, OSAllocator, ForwardFragmenter, AdjacentMerger>{});
+    test(MemoryHeap<std::vector, std::mutex, StackAllocator<8192>, ForwardFragmenter, AdjacentMerger>{});
 }
