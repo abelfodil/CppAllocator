@@ -44,11 +44,11 @@ struct MemoryChunk {
     }
 };
 
-template<typename LowLevelAllocatorPolicy>
+template<template<typename> typename Container, typename LowLevelAllocatorPolicy>
 struct MemoryHeap : LowLevelAllocatorPolicy {
     using AllocatorPolicy = LowLevelAllocatorPolicy;
 
-    std::list<MemoryChunk> storage{};
+    Container<MemoryChunk> storage{};
 
     void free(void *ptr) {
         auto const p = std::find_if(std::begin(storage), std::end(storage), [ptr](auto const &e) { return e == ptr; });
@@ -95,11 +95,11 @@ struct MemoryHeap : LowLevelAllocatorPolicy {
 
 private:
     static void *
-    Fragment(std::list<MemoryChunk> &storage, std::list<MemoryChunk>::iterator const &to_fragment, size_t fragment_at) {
+    Fragment(Container<MemoryChunk> &storage, Container<MemoryChunk>::iterator const &to_fragment, size_t fragment_at) {
         size_t const original_size = to_fragment->size;
         if (fragment_at > original_size) {
             return nullptr;
-        } else if(fragment_at == original_size) {
+        } else if (fragment_at == original_size) {
             return to_fragment->ptr;
         }
 
@@ -116,7 +116,7 @@ private:
         return to_fragment->ptr;
     }
 
-    static void Merge(std::list<MemoryChunk> &storage, std::list<MemoryChunk>::iterator const &to_merge) {
+    static void Merge(Container<MemoryChunk> &storage, Container<MemoryChunk>::iterator const &to_merge) {
         if (std::cend(storage) == to_merge || !to_merge->has_memory() || to_merge->is_used) {
             return;
         }
@@ -208,6 +208,6 @@ void test(AllocatorType &&allocator) {
 }
 
 int main() {
-    test(MemoryHeap<OSAllocator>{});
-    test(MemoryHeap<StackAllocator<8048>>{});
+    test(MemoryHeap<std::list, OSAllocator>{});
+    test(MemoryHeap<std::list, StackAllocator<8048>>{});
 }
