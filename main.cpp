@@ -3,12 +3,24 @@
 #include <list>
 #include <algorithm>
 #include <chrono>
+#include <unistd.h>
 
+struct AllocatedMemory {
+    void *ptr;
+    size_t size;
+};
+
+// TODO See if allocated memory is page aligned
 struct OSAllocator {
-    inline static size_t MinimalSize = 4096;
+    inline static size_t MinimalSize = getpagesize();
 
-    void *Allocate(size_t size) {
-        return mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS, -1, 0);
+    AllocatedMemory Allocate(size_t size) {
+        auto const actual_size = MinimalSize * (size / MinimalSize + 1);
+        auto const ptr = mmap(nullptr, actual_size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS, -1, 0);
+        return {
+                .ptr = ptr,
+                .size = ptr == nullptr ? 0 : actual_size,
+        };
     }
 };
 
@@ -18,11 +30,15 @@ struct StackAllocator {
 
     inline static char buffer[Size];
 
-    void *Allocate(size_t size) {
-        if (size > Size) {
-            return nullptr;
-        }
-        return buffer;
+    AllocatedMemory Allocate(size_t size) {
+        return size > Size
+               ? AllocatedMemory{
+                        .ptr = nullptr,
+                        .size = 0,}
+               : AllocatedMemory{
+                        .ptr = buffer,
+                        .size = Size,
+                };
     }
 };
 
@@ -30,6 +46,13 @@ struct MemoryChunk {
     void *ptr = nullptr;
     size_t size = 0;
     bool is_used = false;
+
+    static MemoryChunk from(AllocatedMemory const &allocatedMemory) {
+        return {
+                .ptr = allocatedMemory.ptr,
+                .size = allocatedMemory.size,
+        };
+    }
 
     bool operator==(MemoryChunk const &rhs) const {
         return this->ptr == rhs.ptr;
@@ -117,17 +140,7 @@ struct MemoryHeap : LowLevelAllocatorPolicy, FragmenterPolicy<Container>, Merger
 
     void *alloc(size_t size) {
         if (std::empty(storage)) {
-            // TODO take alignment into account
-            const size_t actual_size = std::max(LowLevelAllocatorPolicy::MinimalSize, size);
-            storage.emplace_back(MemoryChunk{
-                    .ptr = Allocate(actual_size),
-                    .size = actual_size
-            });
-        }
-
-        if (auto first = std::rbegin(storage); !first->has_memory()) {
-            first->size = 0;
-            return nullptr;
+            storage.emplace_back(MemoryChunk::from(Allocate(size)));
         }
 
         auto const chunk = std::find_if(std::begin(storage), std::end(storage),
@@ -172,9 +185,8 @@ void test(AllocatorType &&allocator) {
     std::cout << "Last chunk size after 1 free: " << allocator.__test_get_last_chunk_size() << ", expected: "
               << AllocatorType::AllocatorPolicy::MinimalSize << "\n";
 
-    constexpr size_t ALLOC_ELEMENTS = 4096;
+    constexpr size_t ALLOC_ELEMENTS = 4090;
     char *elements[ALLOC_ELEMENTS];
-
 
     using std::chrono::high_resolution_clock;
     using std::chrono::duration_cast;
@@ -236,7 +248,7 @@ void test(AllocatorType &&allocator) {
 
 int main() {
     test(MemoryHeap<std::list, OSAllocator, ForwardFragmenter, AdjacentMerger>{});
-    test(MemoryHeap<std::list, StackAllocator<8048>, ForwardFragmenter, AdjacentMerger>{});
+    test(MemoryHeap<std::list, StackAllocator<8192>, ForwardFragmenter, AdjacentMerger>{});
     test(MemoryHeap<std::vector, OSAllocator, ForwardFragmenter, AdjacentMerger>{});
-    test(MemoryHeap<std::vector, StackAllocator<8048>, ForwardFragmenter, AdjacentMerger>{});
+    test(MemoryHeap<std::vector, StackAllocator<8192>, ForwardFragmenter, AdjacentMerger>{});
 }
