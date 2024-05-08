@@ -44,11 +44,42 @@ struct MemoryChunk {
     }
 };
 
-template<template<typename> typename Container, typename LowLevelAllocatorPolicy>
-struct MemoryHeap : LowLevelAllocatorPolicy {
-    using AllocatorPolicy = LowLevelAllocatorPolicy;
+template<template<typename> typename Container>
+struct AdjacentMerger {
+    static void Merge(Container<MemoryChunk> &storage, Container<MemoryChunk>::iterator const &to_merge) {
+        if (std::cend(storage) == to_merge || !to_merge->has_memory() || to_merge->is_used) {
+            return;
+        }
 
-    Container<MemoryChunk> storage{};
+        constexpr auto merge_with_previous = [](auto &storage, auto const &current, auto const &previous) {
+            previous->size += current->size;
+            storage.erase(current);
+        };
+
+        auto current = to_merge;
+
+        auto const previous = std::prev(current);
+        // TODO decouple from is_used
+        if (std::cbegin(storage) != current && !previous->is_used) {
+            merge_with_previous(storage, current, previous);
+            current = previous;
+        }
+
+        auto const next = std::next(current);
+        // TODO decouple from is_used
+        if (std::cend(storage) != next && !next->is_used) {
+            merge_with_previous(storage, next, current);
+        }
+    }
+};
+
+template<template<typename> typename Container, typename LowLevelAllocatorPolicy,
+        template<template<typename> typename> typename MergerPolicy>
+struct MemoryHeap : LowLevelAllocatorPolicy, MergerPolicy<Container> {
+    using AllocatorPolicy = LowLevelAllocatorPolicy;
+    using ContainerType = Container<MemoryChunk>;
+
+    ContainerType storage{};
 
     void free(void *ptr) {
         auto const p = std::find_if(std::begin(storage), std::end(storage), [ptr](auto const &e) { return e == ptr; });
@@ -116,34 +147,9 @@ private:
         return to_fragment->ptr;
     }
 
-    static void Merge(Container<MemoryChunk> &storage, Container<MemoryChunk>::iterator const &to_merge) {
-        if (std::cend(storage) == to_merge || !to_merge->has_memory() || to_merge->is_used) {
-            return;
-        }
-
-        constexpr auto merge_with_previous = [](auto &storage, auto const &current, auto const &previous) {
-            previous->size += current->size;
-            storage.erase(current);
-        };
-
-        auto current = to_merge;
-
-        auto const previous = std::prev(current);
-        // TODO decouple from is_used
-        if (std::cbegin(storage) != current && !previous->is_used) {
-            merge_with_previous(storage, current, previous);
-            current = previous;
-        }
-//
-        auto const next = std::next(current);
-        // TODO decouple from is_used
-        if (std::cend(storage) != next && !next->is_used) {
-            merge_with_previous(storage, next, current);
-        }
-    }
-
     using LowLevelAllocatorPolicy::Allocate;
     using LowLevelAllocatorPolicy::MinimalSize;
+    using MergerPolicy<Container>::Merge;
 };
 
 template<typename AllocatorType>
@@ -208,6 +214,6 @@ void test(AllocatorType &&allocator) {
 }
 
 int main() {
-    test(MemoryHeap<std::list, OSAllocator>{});
-    test(MemoryHeap<std::list, StackAllocator<8048>>{});
+    test(MemoryHeap<std::list, OSAllocator, AdjacentMerger>{});
+    test(MemoryHeap<std::list, StackAllocator<8048>, AdjacentMerger>{});
 }
