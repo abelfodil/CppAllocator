@@ -82,13 +82,14 @@ struct ForwardFragmenter {
         const size_t new_size = to_fragment->size - fragment_at;
         to_fragment->size = fragment_at;
 
+        auto* const ptr = to_fragment->ptr;
         storage.emplace(std::next(to_fragment),
                         MemoryChunk{
-                                .ptr = static_cast<char *>(to_fragment->ptr) + new_size,
+                                .ptr = static_cast<char *>(ptr) + new_size,
                                 .size = new_size,
                         });
 
-        return to_fragment->ptr;
+        return ptr;
     }
 };
 
