@@ -14,7 +14,7 @@ struct AllocatedMemory {
 struct OSAllocator {
     inline static size_t MinimalSize = getpagesize();
 
-    AllocatedMemory Allocate(size_t size) {
+    static AllocatedMemory Allocate(size_t size) {
         auto const actual_size = MinimalSize * (size / MinimalSize + 1);
         auto const ptr = mmap(nullptr, actual_size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS, -1, 0);
         return {
@@ -30,7 +30,7 @@ struct StackAllocator {
 
     inline static char buffer[Size];
 
-    AllocatedMemory Allocate(size_t size) {
+    static AllocatedMemory Allocate(size_t size) {
         return size > Size
                ? AllocatedMemory{
                         .ptr = nullptr,
@@ -69,8 +69,9 @@ struct MemoryChunk {
 
 template<template<typename> typename Container>
 struct ForwardFragmenter {
-    static void *
-    Fragment(Container<MemoryChunk> &storage, Container<MemoryChunk>::iterator const &to_fragment, size_t fragment_at) {
+    static void *Fragment(Container<MemoryChunk> &storage,
+                          Container<MemoryChunk>::iterator const &to_fragment,
+                          size_t fragment_at) {
         size_t const original_size = to_fragment->size;
         if (fragment_at > original_size) {
             return nullptr;
@@ -82,7 +83,7 @@ struct ForwardFragmenter {
         const size_t new_size = to_fragment->size - fragment_at;
         to_fragment->size = fragment_at;
 
-        auto* const ptr = to_fragment->ptr;
+        auto *const ptr = to_fragment->ptr;
         storage.emplace(std::next(to_fragment),
                         MemoryChunk{
                                 .ptr = static_cast<char *>(ptr) + new_size,
