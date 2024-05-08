@@ -104,19 +104,16 @@ struct AdjacentMerger {
             storage.erase(current);
         };
 
-        auto current = to_merge;
-
-        auto const previous = std::prev(current);
-        // TODO decouple from is_used
-        if (std::cbegin(storage) != current && !previous->is_used) {
-            merge_with_previous(storage, current, previous);
-            current = previous;
-        }
-
-        auto const next = std::next(current);
+        auto const next = std::next(to_merge);
         // TODO decouple from is_used
         if (std::cend(storage) != next && !next->is_used) {
-            merge_with_previous(storage, next, current);
+            merge_with_previous(storage, next, to_merge);
+        }
+
+        auto const previous = std::prev(to_merge);
+        // TODO decouple from is_used
+        if (std::cbegin(storage) != to_merge && !previous->is_used) {
+            merge_with_previous(storage, to_merge, previous);
         }
     }
 };
@@ -185,7 +182,7 @@ void test(AllocatorType &&allocator) {
     std::cout << "Last chunk size after 1 free: " << allocator.__test_get_last_chunk_size() << ", expected: "
               << AllocatorType::AllocatorPolicy::MinimalSize << "\n";
 
-    constexpr size_t ALLOC_ELEMENTS = 4090;
+    constexpr size_t ALLOC_ELEMENTS = 4096;
     char *elements[ALLOC_ELEMENTS];
 
     using std::chrono::high_resolution_clock;
