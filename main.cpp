@@ -26,12 +26,12 @@ struct StackAllocator {
     }
 };
 
-struct Chunk {
+struct MemoryChunk {
     void *ptr = nullptr;
     size_t size = 0;
     bool is_used = false;
 
-    bool operator==(Chunk const &rhs) const {
+    bool operator==(MemoryChunk const &rhs) const {
         return this->ptr == rhs.ptr;
     }
 
@@ -48,7 +48,7 @@ template<typename LowLevelAllocatorPolicy>
 struct MemoryHeap : LowLevelAllocatorPolicy {
     using AllocatorPolicy = LowLevelAllocatorPolicy;
 
-    std::list<Chunk> storage{};
+    std::list<MemoryChunk> storage{};
 
     void free(void *ptr) {
         auto const p = std::find_if(std::begin(storage), std::end(storage), [ptr](auto const &e) { return e == ptr; });
@@ -62,7 +62,7 @@ struct MemoryHeap : LowLevelAllocatorPolicy {
         if (std::empty(storage)) {
             // TODO take alignment into account
             const size_t actual_size = std::max(LowLevelAllocatorPolicy::MinimalSize, size);
-            storage.emplace_back(Chunk{
+            storage.emplace_back(MemoryChunk{
                     .ptr = Allocate(actual_size),
                     .size = actual_size
             });
@@ -95,7 +95,7 @@ struct MemoryHeap : LowLevelAllocatorPolicy {
 
 private:
     static void *
-    Fragment(std::list<Chunk> &storage, std::list<Chunk>::iterator const &to_fragment, size_t fragment_at) {
+    Fragment(std::list<MemoryChunk> &storage, std::list<MemoryChunk>::iterator const &to_fragment, size_t fragment_at) {
         size_t const original_size = to_fragment->size;
         if (fragment_at > original_size) {
             return nullptr;
@@ -108,7 +108,7 @@ private:
         to_fragment->size = fragment_at;
 
         storage.emplace(std::next(to_fragment),
-                        Chunk{
+                        MemoryChunk{
                                 .ptr = static_cast<char *>(to_fragment->ptr) + new_size,
                                 .size = new_size,
                         });
@@ -116,7 +116,7 @@ private:
         return to_fragment->ptr;
     }
 
-    static void Merge(std::list<Chunk> &storage, std::list<Chunk>::iterator const &to_merge) {
+    static void Merge(std::list<MemoryChunk> &storage, std::list<MemoryChunk>::iterator const &to_merge) {
         if (std::cend(storage) == to_merge || !to_merge->has_memory() || to_merge->is_used) {
             return;
         }
