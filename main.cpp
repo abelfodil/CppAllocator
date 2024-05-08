@@ -1,6 +1,8 @@
 #include <sys/mman.h>
 #include <iostream>
 #include <memory>
+#include <list>
+#include <algorithm>
 
 struct OSAllocator {
     inline static size_t MinimalSize = 4096;
@@ -24,129 +26,119 @@ struct StackAllocator {
     }
 };
 
-template<typename LowLevelAllocatorPolicy>
-struct MemoryHeapChunk : LowLevelAllocatorPolicy {
-    using AllocatorPolicy = LowLevelAllocatorPolicy;
-
+struct Chunk {
     void *ptr = nullptr;
     size_t size = 0;
     bool is_used = false;
-    MemoryHeapChunk *prev = nullptr;
-    std::shared_ptr<MemoryHeapChunk> next = nullptr;
+
+    bool operator==(Chunk const &rhs) const {
+        return this->ptr == rhs.ptr;
+    }
+
+    bool operator==(void *const rhs) const {
+        return this->ptr == rhs;
+    }
+
+    bool has_memory() const {
+        return ptr != nullptr;
+    }
+};
+
+template<typename LowLevelAllocatorPolicy>
+struct MemoryHeap : LowLevelAllocatorPolicy {
+    using AllocatorPolicy = LowLevelAllocatorPolicy;
+
+    std::list<Chunk> storage{};
 
     void free(void *ptr) {
-        for (auto p = this; p != nullptr;) {
-            if (p->ptr == ptr) {
-                p->is_used = false;
-                Merge(p);
-                break;
-            }
-            p = p->next.get();
+        auto const p = std::find_if(std::begin(storage), std::end(storage), [ptr](auto const &e) { return e == ptr; });
+        if (p != std::cend(storage)) {
+            p->is_used = false;
+            Merge(storage, p);
         }
     }
 
     void *alloc(size_t size) {
-        if (this->size == 0) {
+        if (std::empty(storage)) {
             // TODO take alignment into account
             const size_t actual_size = std::max(LowLevelAllocatorPolicy::MinimalSize, size);
-            this->ptr = Allocate(actual_size);
-            this->size = actual_size;
+            storage.emplace_back(Chunk{
+                    .ptr = Allocate(actual_size),
+                    .size = actual_size
+            });
         }
 
-        if (this->ptr == nullptr) {
-            this->size = 0;
-            next.reset();
+        if (auto first = std::rbegin(storage); !first->has_memory()) {
+            first->size = 0;
             return nullptr;
         }
 
-        if (is_used || size > this->size) {
-            if (next) {
-                return next->alloc(size);
-            } else {
-                return nullptr;
-            }
+        auto const chunk = std::find_if(std::begin(storage), std::end(storage),
+                                        [size](auto const &e) { return !e.is_used && e.size >= size; });
+
+        if (std::cend(storage) == chunk) {
+            return nullptr;
         }
 
-        is_used = true;
-        this->next = Fragment(this, size);
-        return ptr;
+        chunk->is_used = true;
+        return Fragment(storage, chunk, size);
     }
 
     size_t __test_count_chunks() {
-        size_t count = 0;
-        auto p = this;
-        while (p) {
-            ++count;
-            p = p->next.get();
-        }
-        return count;
+        return std::size(storage);
     }
 
-    MemoryHeapChunk *__test_get_last_chunk() {
-        auto p = this;
-        while (true) {
-            if (!p->next) {
-                return p;
-            }
-            p = p->next.get();
-        }
+    size_t __test_get_last_chunk_size() {
+        auto const last_element = std::rbegin(storage);
+        return std::rend(storage) != last_element ? last_element->size : 0U;
     }
 
 private:
-    std::shared_ptr<MemoryHeapChunk> Fragment(MemoryHeapChunk *to_fragment, size_t fragment_at) {
-        const size_t original_size = to_fragment->size;
-        if (fragment_at >= original_size) {
-            return std::move(to_fragment->next);
+    static void *
+    Fragment(std::list<Chunk> &storage, std::list<Chunk>::iterator const &to_fragment, size_t fragment_at) {
+        size_t const original_size = to_fragment->size;
+        if (fragment_at > original_size) {
+            return nullptr;
+        } else if(fragment_at == original_size) {
+            return to_fragment->ptr;
         }
 
         // TODO take alignment into account
         const size_t new_size = to_fragment->size - fragment_at;
         to_fragment->size = fragment_at;
 
-        to_fragment->next = std::make_shared<MemoryHeapChunk>(MemoryHeapChunk{
-                .ptr = static_cast<char *>(to_fragment->ptr) + new_size,
-                .size = new_size,
-                .prev = to_fragment,
-                .next = std::move(to_fragment->next)
-        });
+        storage.emplace(std::next(to_fragment),
+                        Chunk{
+                                .ptr = static_cast<char *>(to_fragment->ptr) + new_size,
+                                .size = new_size,
+                        });
 
-        if (to_fragment->next->next) {
-            to_fragment->next->next->prev = to_fragment->next.get();
-        }
-
-        return to_fragment->next;
+        return to_fragment->ptr;
     }
 
-    void Merge(MemoryHeapChunk *to_merge) {
-        if (!to_merge || to_merge->is_used) {
+    static void Merge(std::list<Chunk> &storage, std::list<Chunk>::iterator const &to_merge) {
+        if (std::cend(storage) == to_merge || !to_merge->has_memory() || to_merge->is_used) {
             return;
         }
 
-        constexpr auto merge_with_previous = [](auto current, auto previous) {
+        constexpr auto merge_with_previous = [](auto &storage, auto const &current, auto const &previous) {
             previous->size += current->size;
-            auto &&next = current->next;
-            if (next) {
-                previous->next = next;
-                previous->next->prev = previous;
-            } else {
-                previous->next.reset();
-            }
+            storage.erase(current);
         };
 
         auto current = to_merge;
-        auto next = to_merge->next.get();
-        auto previous = to_merge->prev;
 
+        auto const previous = std::prev(current);
         // TODO decouple from is_used
-        if (previous && !previous->is_used) {
-            auto old_current = current;
+        if (std::cbegin(storage) != current && !previous->is_used) {
+            merge_with_previous(storage, current, previous);
             current = previous;
-            merge_with_previous(old_current, previous);
         }
-
+//
+        auto const next = std::next(current);
         // TODO decouple from is_used
-        if (next && !next->is_used) {
-            merge_with_previous(next, current);
+        if (std::cend(storage) != next && !next->is_used) {
+            merge_with_previous(storage, next, current);
         }
     }
 
@@ -158,16 +150,15 @@ template<typename AllocatorType>
 void test(AllocatorType &&allocator) {
     std::cout << "Testing allocator of type: " << typeid(AllocatorType).name() << "\n";
 
-    std::cout << "Last chunk size before alloc: " << allocator.__test_get_last_chunk()->size << ", expected: " << 0
+    std::cout << "Last chunk size before alloc: " << allocator.__test_get_last_chunk_size() << ", expected: " << 0
               << "\n";
 
     char *const elem = static_cast<char *>(allocator.alloc(1));
-    std::cout << "Last chunk size after 1 alloc: " << allocator.__test_get_last_chunk()->size << ", expected: "
+    std::cout << "Last chunk size after 1 alloc: " << allocator.__test_get_last_chunk_size() << ", expected: "
               << AllocatorType::AllocatorPolicy::MinimalSize - 1 << "\n";
 
     allocator.free(elem);
-    auto last_chunk = allocator.__test_get_last_chunk();
-    std::cout << "Last chunk size after 1 free: " << last_chunk->size << ", expected: "
+    std::cout << "Last chunk size after 1 free: " << allocator.__test_get_last_chunk_size() << ", expected: "
               << AllocatorType::AllocatorPolicy::MinimalSize << "\n";
 
     constexpr size_t ALLOC_ELEMENTS = 4096;
@@ -217,6 +208,6 @@ void test(AllocatorType &&allocator) {
 }
 
 int main() {
-    test(MemoryHeapChunk<OSAllocator>{});
-    test(MemoryHeapChunk<StackAllocator<8048>>{});
+    test(MemoryHeap<OSAllocator>{});
+    test(MemoryHeap<StackAllocator<8048>>{});
 }
