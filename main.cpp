@@ -45,6 +45,31 @@ struct MemoryChunk {
 };
 
 template<template<typename> typename Container>
+struct ForwardFragmenter {
+    static void *
+    Fragment(Container<MemoryChunk> &storage, Container<MemoryChunk>::iterator const &to_fragment, size_t fragment_at) {
+        size_t const original_size = to_fragment->size;
+        if (fragment_at > original_size) {
+            return nullptr;
+        } else if (fragment_at == original_size) {
+            return to_fragment->ptr;
+        }
+
+        // TODO take alignment into account
+        const size_t new_size = to_fragment->size - fragment_at;
+        to_fragment->size = fragment_at;
+
+        storage.emplace(std::next(to_fragment),
+                        MemoryChunk{
+                                .ptr = static_cast<char *>(to_fragment->ptr) + new_size,
+                                .size = new_size,
+                        });
+
+        return to_fragment->ptr;
+    }
+};
+
+template<template<typename> typename Container>
 struct AdjacentMerger {
     static void Merge(Container<MemoryChunk> &storage, Container<MemoryChunk>::iterator const &to_merge) {
         if (std::cend(storage) == to_merge || !to_merge->has_memory() || to_merge->is_used) {
@@ -74,8 +99,9 @@ struct AdjacentMerger {
 };
 
 template<template<typename> typename Container, typename LowLevelAllocatorPolicy,
+        template<template<typename> typename> typename FragmenterPolicy,
         template<template<typename> typename> typename MergerPolicy>
-struct MemoryHeap : LowLevelAllocatorPolicy, MergerPolicy<Container> {
+struct MemoryHeap : LowLevelAllocatorPolicy, FragmenterPolicy<Container>, MergerPolicy<Container> {
     using AllocatorPolicy = LowLevelAllocatorPolicy;
     using ContainerType = Container<MemoryChunk>;
 
@@ -125,30 +151,9 @@ struct MemoryHeap : LowLevelAllocatorPolicy, MergerPolicy<Container> {
     }
 
 private:
-    static void *
-    Fragment(Container<MemoryChunk> &storage, Container<MemoryChunk>::iterator const &to_fragment, size_t fragment_at) {
-        size_t const original_size = to_fragment->size;
-        if (fragment_at > original_size) {
-            return nullptr;
-        } else if (fragment_at == original_size) {
-            return to_fragment->ptr;
-        }
-
-        // TODO take alignment into account
-        const size_t new_size = to_fragment->size - fragment_at;
-        to_fragment->size = fragment_at;
-
-        storage.emplace(std::next(to_fragment),
-                        MemoryChunk{
-                                .ptr = static_cast<char *>(to_fragment->ptr) + new_size,
-                                .size = new_size,
-                        });
-
-        return to_fragment->ptr;
-    }
-
     using LowLevelAllocatorPolicy::Allocate;
     using LowLevelAllocatorPolicy::MinimalSize;
+    using FragmenterPolicy<Container>::Fragment;
     using MergerPolicy<Container>::Merge;
 };
 
@@ -214,6 +219,6 @@ void test(AllocatorType &&allocator) {
 }
 
 int main() {
-    test(MemoryHeap<std::list, OSAllocator, AdjacentMerger>{});
-    test(MemoryHeap<std::list, StackAllocator<8048>, AdjacentMerger>{});
+    test(MemoryHeap<std::list, OSAllocator, ForwardFragmenter, AdjacentMerger>{});
+    test(MemoryHeap<std::list, StackAllocator<8048>, ForwardFragmenter, AdjacentMerger>{});
 }
