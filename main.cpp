@@ -2,6 +2,7 @@
 #include <iostream>
 #include <list>
 #include <algorithm>
+#include <chrono>
 
 struct OSAllocator {
     inline static size_t MinimalSize = 4096;
@@ -174,11 +175,20 @@ void test(AllocatorType &&allocator) {
     constexpr size_t ALLOC_ELEMENTS = 4096;
     char *elements[ALLOC_ELEMENTS];
 
+
+    using std::chrono::high_resolution_clock;
+    using std::chrono::duration_cast;
+    using std::chrono::milliseconds;
+
+    auto t1 = high_resolution_clock::now();
     for (auto &element: elements) {
         element = static_cast<char *>(allocator.alloc(1));
     }
+    auto t2 = high_resolution_clock::now();
+
     std::cout << "Number of chunks after alloc: " << allocator.__test_count_chunks() << ", expected: "
               << std::min(AllocatorType::AllocatorPolicy::MinimalSize, ALLOC_ELEMENTS + 1) << "\n";
+    std::cout << "Processing time of alloc: " << duration_cast<milliseconds>(t2 - t1).count() << "ms\n";
 
     size_t null_elements = 0;
     for (auto &element: elements) {
@@ -187,12 +197,15 @@ void test(AllocatorType &&allocator) {
     std::cout << "Number of null elements after alloc: " << null_elements << ", expected: "
               << std::max(0, (int) ALLOC_ELEMENTS - (int) AllocatorType::AllocatorPolicy::MinimalSize) << "\n";
 
+    t1 = high_resolution_clock::now();
     for (auto &element: elements) {
         allocator.free(element);
         element = nullptr;
     }
+    t2 = high_resolution_clock::now();
     std::cout << "Number of chunks after free: " << allocator.__test_count_chunks() << ", expected: "
               << 1 << "\n";
+    std::cout << "Processing time of free: " << duration_cast<milliseconds>(t2 - t1).count() << "ms\n";
 
     for (auto &element: elements) {
         element = static_cast<char *>(allocator.alloc(1));
@@ -207,12 +220,16 @@ void test(AllocatorType &&allocator) {
     std::cout << "Number of null elements after alloc: " << null_elements << ", expected: "
               << std::max(0, (int) ALLOC_ELEMENTS - (int) AllocatorType::AllocatorPolicy::MinimalSize) << "\n";
 
+    t1 = high_resolution_clock::now();
     for (auto &element: elements) {
         allocator.free(element);
         element = nullptr;
     }
+    t2 = high_resolution_clock::now();
+
     std::cout << "Number of chunks after free backwards: " << allocator.__test_count_chunks() << ", expected: "
               << 1 << "\n";
+    std::cout << "Processing time of backwards: " << duration_cast<milliseconds>(t2 - t1).count() << "ms\n";
 
     std::cout << "\n\n";
 }
@@ -220,4 +237,6 @@ void test(AllocatorType &&allocator) {
 int main() {
     test(MemoryHeap<std::list, OSAllocator, ForwardFragmenter, AdjacentMerger>{});
     test(MemoryHeap<std::list, StackAllocator<8048>, ForwardFragmenter, AdjacentMerger>{});
+    test(MemoryHeap<std::vector, OSAllocator, ForwardFragmenter, AdjacentMerger>{});
+    test(MemoryHeap<std::vector, StackAllocator<8048>, ForwardFragmenter, AdjacentMerger>{});
 }
