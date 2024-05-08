@@ -13,9 +13,10 @@ add_executable(CppAllocator
 
 target_link_libraries(CppAllocator tbb)
 
+include(FetchContent)
+
 ###########
 ## Tests ##
-include(FetchContent)
 FetchContent_Declare(
         googletest
         URL https://github.com/google/googletest/archive/refs/tags/v1.14.0.zip
@@ -38,3 +39,23 @@ target_link_libraries(
 
 include(GoogleTest)
 gtest_discover_tests(CppAllocator_test)
+
+###############
+## Benchmark ##
+set(BENCHMARK_DOWNLOAD_DEPENDENCIES ON)
+
+FetchContent_Declare(
+        benchmark
+        URL https://github.com/google/benchmark/archive/refs/tags/v1.8.3.zip
+)
+FetchContent_MakeAvailable(benchmark)
+
+add_executable(
+        CppAllocator_benchmark
+        main_benchmark.cpp
+)
+target_link_libraries(
+        CppAllocator_benchmark
+        benchmark::benchmark
+        tbb
+)
